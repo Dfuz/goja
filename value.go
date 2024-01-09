@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/maphash"
 	"math"
+	"math/big"
 	"reflect"
 	"strconv"
 	"unsafe"
@@ -47,6 +48,7 @@ var (
 	reflectTypeBool     = reflect.TypeOf(false)
 	reflectTypeNil      = reflect.TypeOf(nil)
 	reflectTypeFloat    = reflect.TypeOf(float64(0))
+	reflectTypeBigInt   = reflect.TypeOf(big.Int{})
 	reflectTypeMap      = reflect.TypeOf(map[string]interface{}{})
 	reflectTypeArray    = reflect.TypeOf([]interface{}{})
 	reflectTypeArrayPtr = reflect.TypeOf((*[]interface{})(nil))
@@ -80,6 +82,7 @@ type Value interface {
 	String() string
 	ToFloat() float64
 	ToNumber() Value
+	ToBigInt() Value
 	ToBoolean() bool
 	ToObject(*Runtime) *Object
 	SameAs(Value) bool
@@ -104,6 +107,8 @@ type syntaxError string
 
 type valueInt int64
 type valueFloat float64
+type valueBigInt struct{ *big.Int }
+
 type valueBool bool
 type valueNull struct{}
 type valueUndefined struct {
@@ -210,6 +215,10 @@ func (i valueInt) ToNumber() Value {
 	return i
 }
 
+func (i valueInt) ToBigInt() Value {
+	return valueBigInt{big.NewInt(int64(i))}
+}
+
 func (i valueInt) SameAs(other Value) bool {
 	return i == other
 }
@@ -256,6 +265,99 @@ func (i valueInt) ExportType() reflect.Type {
 
 func (i valueInt) hash(*maphash.Hash) uint64 {
 	return uint64(i)
+}
+
+func (b valueBigInt) ToInteger() int64 {
+	return b.Int64()
+}
+
+func (b valueBigInt) toString() String {
+	return asciiString(b.String())
+}
+
+func (b valueBigInt) toPrimitiveNumber() Value {
+	return b
+}
+
+func (b valueBigInt) string() unistring.String {
+	return unistring.String(b.String())
+}
+
+func (b valueBigInt) ToString() Value {
+	return b
+}
+
+func (b valueBigInt) String() string {
+	return b.Int.String()
+}
+
+func (b valueBigInt) ToFloat() float64 {
+	return float64(b.Int64())
+}
+
+func (b valueBigInt) ToBoolean() bool {
+	return b.Int64() != 0
+}
+
+func (b valueBigInt) ToObject(r *Runtime) *Object {
+	return r.newPrimitiveObject(b, r.global.BigIntPrototype, "BigInt")
+}
+
+func (b valueBigInt) ToNumber() Value {
+	return b
+}
+
+func (b valueBigInt) ToBigInt() Value {
+	return b
+}
+
+func (b valueBigInt) SameAs(other Value) bool {
+	if other, ok := other.(valueBigInt); ok {
+		return b == other
+	}
+	return false
+}
+
+func (b valueBigInt) Equals(other Value) bool {
+	switch o := other.(type) {
+	case valueBigInt:
+		return b.Cmp(o.Int) == 0
+	case valueFloat:
+		return float64(b.Int64()) == float64(o)
+	case valueInt:
+		return b.Int64() == int64(o)
+	case String, valueBool:
+		return b.Int64() == o.ToInteger()
+	case *Object:
+		return b.Equals(o.toPrimitive())
+	}
+
+	return false
+}
+
+func (b valueBigInt) StrictEquals(other Value) bool {
+	switch o := other.(type) {
+	case valueBigInt:
+		return b.Cmp(o.Int) == 0
+	}
+
+	return false
+}
+
+func (b valueBigInt) baseObject(r *Runtime) *Object {
+	return r.global.BigIntPrototype
+}
+
+func (b valueBigInt) Export() interface{} {
+	return (*big.Int)(b.Int)
+}
+
+func (b valueBigInt) ExportType() reflect.Type {
+	return reflectTypeBigInt
+}
+
+func (b valueBigInt) hash(*maphash.Hash) uint64 {
+	return uint64(b.Int64())
 }
 
 func (b valueBool) ToInteger() int64 {
@@ -307,6 +409,13 @@ func (b valueBool) ToNumber() Value {
 		return valueInt(1)
 	}
 	return valueInt(0)
+}
+
+func (b valueBool) ToBigInt() Value {
+	if b {
+		return valueBigInt{big.NewInt(1)}
+	}
+	return valueBigInt{big.NewInt(0)}
 }
 
 func (b valueBool) SameAs(other Value) bool {
@@ -396,6 +505,10 @@ func (u valueUndefined) ToNumber() Value {
 	return _NaN
 }
 
+func (u valueUndefined) ToBigInt() Value {
+	panic(typeError("Cannot convert undefined to a BigInt"))
+}
+
 func (u valueUndefined) SameAs(other Value) bool {
 	_, same := other.(valueUndefined)
 	return same
@@ -430,6 +543,10 @@ func (n valueNull) ToObject(r *Runtime) *Object {
 
 func (n valueNull) ToNumber() Value {
 	return intToValue(0)
+}
+
+func (i valueNull) ToBigInt() Value {
+	panic(typeError("Cannot convert null to a BigInt"))
 }
 
 func (n valueNull) SameAs(other Value) bool {
@@ -499,6 +616,10 @@ func (p *valueProperty) ToObject(*Runtime) *Object {
 }
 
 func (p *valueProperty) ToNumber() Value {
+	return nil
+}
+
+func (p *valueProperty) ToBigInt() Value {
 	return nil
 }
 
@@ -611,6 +732,11 @@ func (f valueFloat) ToNumber() Value {
 	return f
 }
 
+func (f valueFloat) ToBigInt() Value {
+	i := floatToIntClip(float64(f))
+	return valueBigInt{big.NewInt(i)}
+}
+
 func (f valueFloat) SameAs(other Value) bool {
 	switch o := other.(type) {
 	case valueFloat:
@@ -720,6 +846,10 @@ func (o *Object) ToNumber() Value {
 
 func (o *Object) SameAs(other Value) bool {
 	return o.StrictEquals(other)
+}
+
+func (o *Object) ToBigInt() Value {
+	return o.toPrimitiveBigInt().ToBigInt()
 }
 
 func (o *Object) Equals(other Value) bool {
@@ -1059,6 +1189,10 @@ func (s *Symbol) ToFloat() float64 {
 
 func (s *Symbol) ToNumber() Value {
 	panic(typeError("Cannot convert a Symbol value to a number"))
+}
+
+func (s *Symbol) ToBigInt() Value {
+	panic(typeError("Cannot convert a Symbol value to a bigint"))
 }
 
 func (s *Symbol) ToBoolean() bool {

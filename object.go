@@ -20,6 +20,7 @@ const (
 	classFunction      = "Function"
 	classAsyncFunction = "AsyncFunction"
 	classNumber        = "Number"
+	classBigInt        = "BigInt"
 	classString        = "String"
 	classBoolean       = "Boolean"
 	classError         = "Error"
@@ -42,6 +43,7 @@ const (
 var (
 	hintDefault Value = asciiString("default")
 	hintNumber  Value = asciiString("number")
+	hintBigInt  Value = asciiString("bigint")
 	hintString  Value = asciiString("string")
 )
 
@@ -862,6 +864,18 @@ func (o *Object) ordinaryToPrimitiveNumber() Value {
 	panic(o.runtime.NewTypeError("Could not convert %v to primitive", o.self))
 }
 
+func (o *Object) ordinaryToPrimitiveBigInt() Value {
+	if v := o.tryPrimitive("valueOf"); v != nil {
+		return v
+	}
+
+	if v := o.tryPrimitive("toString"); v != nil {
+		return v
+	}
+
+	panic(o.runtime.NewTypeError("Could not convert %v to primitive", o.self))
+}
+
 func (o *Object) ordinaryToPrimitiveString() Value {
 	if v := o.tryPrimitive("toString"); v != nil {
 		return v
@@ -895,6 +909,14 @@ func (o *Object) toPrimitiveNumber() Value {
 	}
 
 	return o.ordinaryToPrimitiveNumber()
+}
+
+func (o *Object) toPrimitiveBigInt() Value {
+	if v := o.tryExoticToPrimitive(hintBigInt); v != nil {
+		return v
+	}
+
+	return o.ordinaryToPrimitiveBigInt()
 }
 
 func (o *Object) toPrimitiveString() Value {

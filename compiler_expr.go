@@ -1,6 +1,9 @@
 package goja
 
 import (
+	"fmt"
+	"math/big"
+
 	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/file"
 	"github.com/dop251/goja/token"
@@ -247,6 +250,8 @@ func (c *compiler) compileExpression(v ast.Expression) compiledExpr {
 		return c.compileAssignExpression(v)
 	case *ast.NumberLiteral:
 		return c.compileNumberLiteral(v)
+	case *ast.BigIntLiteral:
+		return c.compileBigIntLiteral(v)
 	case *ast.StringLiteral:
 		return c.compileStringLiteral(v)
 	case *ast.TemplateLiteral:
@@ -3231,6 +3236,25 @@ func (c *compiler) compileNumberLiteral(v *ast.NumberLiteral) compiledExpr {
 	default:
 		c.assert(false, int(v.Idx)-1, "Unsupported number literal type: %T", v.Value)
 		panic("unreachable")
+	}
+	r := &compiledLiteral{
+		val: val,
+	}
+	r.init(c, v.Idx0())
+	return r
+}
+
+func (c *compiler) compileBigIntLiteral(v *ast.BigIntLiteral) compiledExpr {
+	if c.scope.strict && len(v.Literal) > 1 && v.Literal[0] == '0' && v.Literal[1] <= '7' && v.Literal[1] >= '0' {
+		c.throwSyntaxError(int(v.Idx)-1, "Octal literals are not allowed in strict mode")
+		panic("Unreachable")
+	}
+	var val Value
+	switch num := v.Value.(type) {
+	case *big.Int:
+		val = valueBigInt{num}
+	default:
+		panic(fmt.Errorf("Unsupported bigint literal type: %T", v.Value))
 	}
 	r := &compiledLiteral{
 		val: val,
